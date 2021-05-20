@@ -6,7 +6,12 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-actix-web = "3"
+actix = "0.11.1"
+actix-web = "3.3.2"
+actix-utils = "3.0.0"
+local-channel = "0.1.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "0.8", features = ["serde", "v4"] }
+futures = "0.3"
+crossbeam-channel = "0.5.1"

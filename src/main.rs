@@ -2,10 +2,12 @@ use actix_web::{get, post, web, App, HttpServer, Result, middleware, HttpRespons
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap};
 use std::collections::VecDeque;
-use std::sync::Mutex;
-use std::sync::Arc;
-use std::time::SystemTime;
+use std::sync::{Mutex, Arc};
+use std::time::{SystemTime, Duration};
 use uuid::Uuid;
+use local_channel::mpsc;
+use actix_web::rt::time::{interval_at, Instant};
+use actix::clock;
 
 
 #[derive(Deserialize)]
@@ -14,7 +16,10 @@ struct QueueInfo {
 }
 
 struct QueueManager {
-    index: HashMap<String, Arc<Mutex<VecDeque<String>>>>
+    index: HashMap<String, Arc<Mutex<VecDeque<String>>>>,
+//    subscribers: HashMap<String, Arc<Mutex<Vec<local_channel::mpsc::Sender<String>>>>>
+subscribers: HashMap<String, Arc<Mutex<Vec<local_channel::mpsc::Sender<String>>>>>
+
 }
 
 #[derive(Deserialize, Serialize)]
@@ -39,6 +44,8 @@ async fn list_queues(data: web::Data<Mutex<QueueManager>>) ->  Result<HttpRespon
     let payload_all_queues = serde_json::to_value(queue_status_vec);
     return Ok(HttpResponse::Ok().content_type("application/json").body(payload_all_queues.unwrap().to_string()))
 }
+
+
 
 #[get("/q/{queuename}")]
 async fn queue_read(info: web::Path<QueueInfo>, data: web::Data<Mutex<QueueManager>>) -> Result<HttpResponse, Error> { 
@@ -81,7 +88,7 @@ async fn queue_write(req_body: String, info: web::Path<QueueInfo>, data: web::Da
                 None => (),
             }
             match data.index.get(&info.queuename) { 
-                Some(vl) => vl.clone().lock().unwrap().push_back(json_payload.as_ref().unwrap().clone().to_string()),
+                Some(vl) => vl.lock().unwrap().push_back(json_payload.as_ref().unwrap().clone().to_string()),
                 None => (),
             }
         },
@@ -90,9 +97,51 @@ async fn queue_write(req_body: String, info: web::Path<QueueInfo>, data: web::Da
 }
   
 
+#[get("/c/{queuename}")]
+async fn queue_streaming(info: web::Path<QueueInfo>, data: web::Data<Mutex<QueueManager>>) -> HttpResponse { 
+    let (tx, mut rx) = mpsc::channel<String>();
+    let mut data = data.lock().unwrap();
+    let subscribers = data.subscribers.get(&info.queuename);
+
+    match subscribers {
+        Some(subs) => match subs.lock() {
+            Ok(mut v) => v.push(tx),
+            Err(e) => ()//Ok(HttpResponse::BadRequest().content_type("application/json").body(format!("msg: err {:?}", e)))
+        }, 
+        None => {
+            match data.subscribers.insert(info.queuename.clone(),Arc::new(Mutex::new(Vec::new()))) {
+                Some(qq) => qq.lock().unwrap().push(tx.clone()), 
+                None => (),
+            }
+            match data.subscribers.get(&info.queuename) { 
+                Some(vl) => vl.lock().unwrap().push(tx.clone()),
+                None => (),
+            }
+        }
+    }
+   
+    let text = format!("Hello {}!", info.queuename);
+    let _ = () ;//tx.send(Ok::<_, Error>(web::Bytes::from(text.clone())));
+    // print!("lero");
+    // actix_web::rt::spawn(async move {
+    //    // let mut task = interval_at(Instant::now(), Duration::from_secs(10));
+    //     let _ = tx.send(Ok::<_, Error>(web::Bytes::from(text.clone())));
+        
+    //     loop {
+    //         //task.tick().await;
+    //         actix::clock::sleep(Duration::from_millis(1000)).await;
+    //         let _ = tx.send(Ok::<_, Error>(web::Bytes::from(text.clone())));
+    //     }
+    // });
+    // // .content_type("application/json")
+    HttpResponse::Ok().streaming(rx)
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let data = web::Data::new(Mutex::new(QueueManager{ index: HashMap::new() }));
+    let data = web::Data::new(Mutex::new(QueueManager{ 
+        index: HashMap::new(), 
+        subscribers: HashMap::new() }));
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::Logger::default())
@@ -100,5 +149,6 @@ async fn main() -> std::io::Result<()> {
             .service(queue_read)
             .service(queue_write)
             .service(list_queues)
+            .service(queue_streaming)
     }).bind("127.0.0.1:8080")?.run().await
 }
