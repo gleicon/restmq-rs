@@ -22,7 +22,7 @@ dependencies = [
  "parking_lot",
  "pin-project-lite 0.2.6",
  "smallvec",
- "tokio 1.5.0",
+ "tokio 1.6.0",
  "tokio-util 0.6.7",
 ]
 
@@ -153,7 +153,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc7d7cd957c9ed92288a7c3c96af81fa5291f65247a76a34dac7b6af74e52ba0"
 dependencies = [
  "futures-core",
- "tokio 1.5.0",
+ "tokio 1.6.0",
 ]
 
 [[package]]
@@ -1331,11 +1331,11 @@ dependencies = [
  "actix",
  "actix-utils 3.0.0",
  "actix-web",
- "crossbeam-channel",
  "futures",
  "local-channel",
  "serde",
  "serde_json",
+ "tokio 1.6.0",
  "uuid",
 ]
 
@@ -1642,9 +1642,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.5.0"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83f0c8e7c0addab50b663055baf787d0af7f413a46e6e7fb9559a4e4db7137a5"
+checksum = "bd3076b5c8cc18138b8f8814895c11eb4de37114a5d127bafdc5e55798ceef37"
 dependencies = [
  "autocfg",
  "bytes 1.0.1",
@@ -1683,7 +1683,7 @@ dependencies = [
  "futures-sink",
  "log",
  "pin-project-lite 0.2.6",
- "tokio 1.5.0",
+ "tokio 1.6.0",
 ]
 
 [[package]]

@@ -1,14 +1,16 @@
-use actix_web::{get, post, web, App, HttpServer, Result, middleware, HttpResponse, Error};
-use serde::{Deserialize, Serialize};
 use std::{collections::HashMap};
 use std::collections::VecDeque;
 use std::sync::{Mutex, Arc};
-use std::time::{SystemTime, Duration};
+use std::time::SystemTime;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use uuid::Uuid;
-use local_channel::mpsc;
-use actix_web::rt::time::{interval_at, Instant};
-use actix::clock;
+use futures::{Stream};
 
+use actix_web::{get, post, web, App, HttpServer, Result, middleware, HttpResponse, Error};
+use actix_web::web::{Bytes};
+use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 #[derive(Deserialize)]
 struct QueueInfo {
@@ -17,9 +19,21 @@ struct QueueInfo {
 
 struct QueueManager {
     index: HashMap<String, Arc<Mutex<VecDeque<String>>>>,
-//    subscribers: HashMap<String, Arc<Mutex<Vec<local_channel::mpsc::Sender<String>>>>>
-subscribers: HashMap<String, Arc<Mutex<Vec<local_channel::mpsc::Sender<String>>>>>
+    subscribers: HashMap<String, Arc<Mutex<Vec<Sender<Bytes>>>>>
 
+}
+
+struct Subscriber(Receiver<Bytes>);
+
+impl Stream for Subscriber {
+    type Item = Result<Bytes, Error>;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>, ) -> Poll<Option<Self::Item>> {
+        match Pin::new(&mut self.0).poll_recv(cx) {
+            Poll::Ready(Some(v)) => Poll::Ready(Some(Ok(v))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -72,34 +86,45 @@ async fn queue_write(req_body: String, info: web::Path<QueueInfo>, data: web::Da
 
     let mut data = data.lock().unwrap();
     let queue = data.index.get(&info.queuename);
+//    let subscribers = data.subscribers.get(&info.queuename);
 
     let uuid = Uuid::new_v4();
     let payload = QueueMessage {id: uuid, body: req_body.clone(), created_at: SystemTime::now()};
     let json_payload = serde_json::to_value(&payload);
+    let msg = json_payload.unwrap().to_string();
 
     match queue {
         Some(vect) => match vect.lock() { 
-            Ok(mut v) => v.push_back(json_payload.unwrap().to_string()),
+            Ok(mut v) =>  v.push_back(msg.clone()),
             Err(e) => return Ok(HttpResponse::BadRequest().content_type("application/json").body(format!("msg: err {:?}", e))),
         }, 
         None =>  { 
             match data.index.insert(info.queuename.clone(),Arc::new(Mutex::new(VecDeque::new()))) {
-                Some(qq) => qq.lock().unwrap().push_back(json_payload.as_ref().unwrap().to_string()), 
+                Some(qq) => qq.lock().unwrap().push_back(msg.clone()), 
                 None => (),
             }
             match data.index.get(&info.queuename) { 
-                Some(vl) => vl.lock().unwrap().push_back(json_payload.as_ref().unwrap().clone().to_string()),
+                Some(vl) => vl.lock().unwrap().push_back(msg.clone()),
                 None => (),
             }
         },
     }
+    match data.subscribers.get(&info.queuename) {
+        Some(subs) => {
+            for subscriber in subs.lock().unwrap().iter() {
+                let _ = subscriber.try_send(Bytes::from(msg.clone() + "\n\n"));
+            } 
+        },
+        None => ()
+    }
+    
     Ok(HttpResponse::Ok().content_type("application/json").body(format!("message sent {} to topic {}", req_body, info.queuename)))
 }
   
 
 #[get("/c/{queuename}")]
 async fn queue_streaming(info: web::Path<QueueInfo>, data: web::Data<Mutex<QueueManager>>) -> HttpResponse { 
-    let (tx, mut rx) = mpsc::channel<String>();
+    let (tx, rx) = channel(100);
     let mut data = data.lock().unwrap();
     let subscribers = data.subscribers.get(&info.queuename);
 
@@ -120,21 +145,7 @@ async fn queue_streaming(info: web::Path<QueueInfo>, data: web::Data<Mutex<Queue
         }
     }
    
-    let text = format!("Hello {}!", info.queuename);
-    let _ = () ;//tx.send(Ok::<_, Error>(web::Bytes::from(text.clone())));
-    // print!("lero");
-    // actix_web::rt::spawn(async move {
-    //    // let mut task = interval_at(Instant::now(), Duration::from_secs(10));
-    //     let _ = tx.send(Ok::<_, Error>(web::Bytes::from(text.clone())));
-        
-    //     loop {
-    //         //task.tick().await;
-    //         actix::clock::sleep(Duration::from_millis(1000)).await;
-    //         let _ = tx.send(Ok::<_, Error>(web::Bytes::from(text.clone())));
-    //     }
-    // });
-    // // .content_type("application/json")
-    HttpResponse::Ok().streaming(rx)
+    HttpResponse::Ok().streaming(Subscriber(rx))
 }
 
 #[actix_web::main]
