@@ -21,3 +21,5 @@ $ curl http://localhost:8080/c/hello
 in another terminal:
 
 $ curl -XPOST -d "world" http://localhost:8080/q/hello
+
+![terminal](restmq-rs.gif)
