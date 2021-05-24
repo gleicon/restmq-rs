@@ -17,8 +17,8 @@ impl QueueManager {
     fn new_queue(mut self: Self, queue_name: String) {
         self.index.insert(queue_name.clone(),Arc::new(Mutex::new(VecDeque::new())));
         self.subscribers.insert(queue_name,Arc::new(Mutex::new(Vec::new())));
-
     }
+
     fn queue_exists(self: Self, queue_name: String) -> bool {
         return self.index.contains_key(&queue_name)
     }
@@ -51,6 +51,27 @@ impl QueueManager {
             },
             None => ()
         }
+    }
+    fn count_subscribers(&mut self, queue_name: String) -> usize {
+        let sbs = self.subscribers.get(&queue_name).unwrap().lock().unwrap().len();
+        return sbs.clone()
+    }
+
+    fn queue_status(self: Self) -> String {
+        type QS = (String, usize, usize); // Queue Name, length, subscribers
+
+        let mut queue_status_vec : Vec<QS>;
+        
+        queue_status_vec = Vec::new();
+
+        for (k,v) in self.index.iter() {
+            let ll = v.lock().unwrap().len();
+            let sl = self.subscribers.get(&k.to_string()).unwrap().lock().unwrap().len();
+            let qm: QS = (k.clone(), ll, sl);
+            queue_status_vec.push(qm);
+        };
+    let payload_all_queues = serde_json::to_value(queue_status_vec);
+    return payload_all_queues.unwrap().to_string()
     }
 }
 
