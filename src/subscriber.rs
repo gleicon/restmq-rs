@@ -6,9 +6,9 @@ use actix_web::web::Bytes;
 use actix_web::{Result, Error};
 
 
-pub struct Subscriber(pub Receiver<Bytes>);
+pub struct SubscriberChannel(pub Receiver<Bytes>);
 
-impl Stream for Subscriber {
+impl Stream for SubscriberChannel {
     type Item = Result<Bytes, Error>;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>, ) -> Poll<Option<Self::Item>> {
         match Pin::new(&mut self.0).poll_recv(cx) {

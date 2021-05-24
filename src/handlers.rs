@@ -57,7 +57,6 @@ async fn queue_write(req_body: String, info: web::Path<QueueInfo>, data: web::Da
     
     let mut data = data.lock().unwrap();
     let queue = data.index.get(&info.queuename);
-    //    let subscribers = data.subscribers.get(&info.queuename);
     
     let uuid = Uuid::new_v4();
     let payload = crate::data::QueueMessage {id: uuid, body: req_body.clone(), created_at: SystemTime::now()};
@@ -80,6 +79,7 @@ async fn queue_write(req_body: String, info: web::Path<QueueInfo>, data: web::Da
             }
         },
     }
+    
     match data.subscribers.get(&info.queuename) {
         Some(subs) => {
             for subscriber in subs.lock().unwrap().iter() {
@@ -97,13 +97,15 @@ async fn queue_streaming(info: web::Path<QueueInfo>, data: web::Data<Mutex<crate
     let (tx, rx) = channel(100);
     let mut data = data.lock().unwrap();
     let subscribers = data.subscribers.get(&info.queuename);
-    
+
+
     match subscribers {
+        
         Some(subs) => match subs.lock() {
             Ok(mut v) => v.push(tx),
-            Err(_e) => ()//Ok(HttpResponse::BadRequest().content_type("application/json").body(format!("msg: err {:?}", e)))
+            Err(e) => return HttpResponse::BadRequest().content_type("application/json").body(format!("msg: err {:?}", e)) // wrap error message
         }, 
-        None => {
+        None => {// if the key is not present in the hashmap, create it and insert the subscriber Receive half
             match data.subscribers.insert(info.queuename.clone(),Arc::new(Mutex::new(Vec::new()))) {
                 Some(qq) => qq.lock().unwrap().push(tx.clone()), 
                 None => (),
@@ -115,7 +117,7 @@ async fn queue_streaming(info: web::Path<QueueInfo>, data: web::Data<Mutex<crate
         }
     }
     
-    HttpResponse::Ok().streaming(crate::subscriber::Subscriber(rx))
+    HttpResponse::Ok().streaming(crate::subscriber::SubscriberChannel(rx))
 }
 
 
