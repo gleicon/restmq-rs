@@ -4,12 +4,12 @@ use std::sync::Mutex;
 use actix_web::{web, App, HttpServer, middleware};
 
 mod handlers;
-mod data;
+mod queue;
 mod subscriber;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let data = web::Data::new(Mutex::new(data::QueueManager{ 
+    let data = web::Data::new(Mutex::new(queue::QueueManager{ 
         index: HashMap::new(), 
         subscribers: HashMap::new() }));
     HttpServer::new(move || {
