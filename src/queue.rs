@@ -6,6 +6,8 @@ use tokio::sync::mpsc::Sender;
 use actix_web::web::Bytes;
 use uuid::Uuid;
 use std::time::SystemTime;
+use tokio::sync::mpsc::channel;
+
 
 
 #[derive(Deserialize, Serialize)]
@@ -97,7 +99,6 @@ impl QueueManager {
                 Ok(mut v) => { 
                     match v.pop_front() {
                         Some(payload) => { 
-                            print!("-> {}", payload);
                             return Ok(payload)
                         },
                         
@@ -108,6 +109,32 @@ impl QueueManager {
             }, 
             None => return Ok(format!("msg: queue <{:?}> not found", queue_name.clone())),
         }
+    }
+
+    pub fn append_subscriber(&mut self, queue_name: String) -> Result<crate::subscriber::SubscriberChannel, String> {
+    
+        let (tx, rx) = channel(100);
+        let mut subscribers = self.subscribers.get(&queue_name);
+
+
+        match subscribers {
+        
+            Some(subs) => match subs.lock() {
+                Ok(mut v) => v.push(tx),
+                Err(e) => return Err(format!("msg: err {:?}", e)) // wrap error message
+            }, 
+            None => {// if the key is not present in the hashmap, create it and insert the subscriber Receive half
+                match self.subscribers.insert(queue_name.clone(),Arc::new(Mutex::new(Vec::new()))) {
+                    Some(qq) => qq.lock().unwrap().push(tx.clone()), 
+                    None => (),
+                }
+                match self.subscribers.get(&queue_name) { 
+                    Some(vl) => vl.lock().unwrap().push(tx.clone()),
+                    None => (),
+                }
+            }
+        }
+        Ok(crate::subscriber::SubscriberChannel(rx))
     }
 
 }

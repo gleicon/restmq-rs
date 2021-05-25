@@ -1,16 +1,6 @@
-use std::collections::VecDeque;
-use std::sync::{Mutex, Arc};
-use std::time::SystemTime;
-use uuid::Uuid;
-
+use std::sync::Mutex;
 use actix_web::{get, post, web, Result, HttpResponse, Error};
-use actix_web::web::{Bytes};
 use serde::Deserialize;
-use tokio::sync::mpsc::channel;
-
-
-
-type QueueStatus = (String, usize); // Queue Name and length
 
 #[derive(Deserialize, Clone)]
 struct QueueInfo {
@@ -49,31 +39,13 @@ async fn queue_write(req_body: String, info: web::Path<QueueInfo>, data: web::Da
 }
 
 #[get("/c/{queuename}")]
-async fn queue_streaming(info: web::Path<QueueInfo>, data: web::Data<Mutex<crate::queue::QueueManager>>) -> HttpResponse { 
-    let (tx, rx) = channel(100);
+async fn queue_streaming(info: web::Path<QueueInfo>, data: web::Data<Mutex<crate::queue::QueueManager>>) ->  Result<HttpResponse, Error>  { 
+
     let mut data = data.lock().unwrap();
-    let subscribers = data.subscribers.get(&info.queuename);
-
-
-    match subscribers {
-        
-        Some(subs) => match subs.lock() {
-            Ok(mut v) => v.push(tx),
-            Err(e) => return HttpResponse::BadRequest().content_type("application/json").body(format!("msg: err {:?}", e)) // wrap error message
-        }, 
-        None => {// if the key is not present in the hashmap, create it and insert the subscriber Receive half
-            match data.subscribers.insert(info.queuename.clone(),Arc::new(Mutex::new(Vec::new()))) {
-                Some(qq) => qq.lock().unwrap().push(tx.clone()), 
-                None => (),
-            }
-            match data.subscribers.get(&info.queuename) { 
-                Some(vl) => vl.lock().unwrap().push(tx.clone()),
-                None => (),
-            }
-        }
-    }
-    
-    HttpResponse::Ok().streaming(crate::subscriber::SubscriberChannel(rx))
+    match data.append_subscriber(info.queuename.clone()) {
+        Ok(sb) =>  return Ok(HttpResponse::Ok().streaming(sb)),
+        Err(_e) =>  return Ok(HttpResponse::BadRequest().content_type("application/json").body(format!("msg: error subscribing {:?}", &info.queuename))),
+    };
 }
 
 
