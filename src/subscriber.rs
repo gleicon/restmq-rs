@@ -5,7 +5,6 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use actix_web::web::Bytes;
 use actix_web::{Result, Error};
 
-
 pub struct SubscriberChannel(pub UnboundedReceiver<Bytes>);
 
 impl Stream for SubscriberChannel {
