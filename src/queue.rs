@@ -1,12 +1,13 @@
 
-use std::collections::{VecDeque, HashMap};
+use std::collections::{VecDeque, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, Arc};
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::UnboundedSender;
 use actix_web::web::Bytes;
 use uuid::Uuid;
 use std::time::SystemTime;
-use tokio::sync::mpsc::channel;
+use tokio::sync::mpsc::unbounded_channel; //{channel, unbounded};
+use tokio::sync::mpsc::error::SendError;
 
 
 
@@ -20,7 +21,8 @@ pub struct QueueMessageEnvelope {
 #[derive(Clone)]
 pub struct QueueManager {
     pub index: HashMap<String, Arc<Mutex<VecDeque<String>>>>,
-    pub subscribers: HashMap<String, Arc<Mutex<Vec<Sender<Bytes>>>>>
+    pub subscribers: HashMap<String, Arc<Mutex<Vec<UnboundedSender<Bytes>>>>>,
+    pub subscriber_set: HashMap<String, Arc<Mutex<HashSet<UnboundedSender<Bytes>>>>>,
 }
 
 impl QueueManager {
@@ -40,7 +42,6 @@ impl QueueManager {
         let json_payload = serde_json::to_value(&payload);
         let msg = json_payload.unwrap().to_string();
 
-
         if !self.index.contains_key(&queue_name) && create_queue {
             self.index.insert(queue_name.clone(), Arc::new(Mutex::new(VecDeque::new())));
         } else if !self.index.contains_key(&queue_name) {
@@ -57,21 +58,33 @@ impl QueueManager {
         self.publish_to_subscribers(queue_name.clone(), msg.clone());
         return Ok(msg)
     }
-
+ 
     pub fn publish_to_subscribers(&mut self, queue_name: String, message: String) {
+        //let mut clean_vector = Vec::new(); //Arc::new(Mutex::new(Vec::new()))
+        let mut offline_subs: Vec<bool> = Vec::new();
+
         match self.subscribers.get(&queue_name) {
+            // TODO: auto cleanup on error
             Some(subs) => {
+                let mut counter = 0;
+                info!("Subscribers count: {}", subs.lock().unwrap().len());
                 for subscriber in subs.lock().unwrap().iter() {
-                    let _ = subscriber.try_send(Bytes::from(message.clone() + "\n\n"));
-                } 
+                    match subscriber.send(Bytes::from(message.clone() + "\n\n")) {
+                        Ok(_m) => offline_subs.push(true), 
+                        Err(SendError(_)) => {
+                            offline_subs.push(false);
+                            //subs.lock().unwrap().remove(counter);
+                            info!("Subscriber {} not found", counter);
+                        },
+                    };
+                    counter+=1;
+                }
+                // info!("{:?}", offline_subs);
+                // subs.lock().unwrap().retain(|_| *offline_subs.iter().next().unwrap());
+                // info!("now: {:?}",subs.lock().unwrap().len() );
             },
             None => ()
         }
-    }
-
-    fn count_subscribers(&mut self, queue_name: String) -> usize {
-        let sbs = self.subscribers.get(&queue_name).unwrap().lock().unwrap().len();
-        return sbs.clone()
     }
 
     pub fn queue_status(self: Self) -> String {
@@ -113,9 +126,9 @@ impl QueueManager {
 
     pub fn append_subscriber(&mut self, queue_name: String) -> Result<crate::subscriber::SubscriberChannel, String> {
     
-        let (tx, rx) = channel(100);
-        let mut subscribers = self.subscribers.get(&queue_name);
-
+        let (tx, rx) = unbounded_channel();
+        let subscribers = self.subscribers.get(&queue_name);
+        
 
         match subscribers {
         
@@ -137,4 +150,6 @@ impl QueueManager {
         Ok(crate::subscriber::SubscriberChannel(rx))
     }
 
+   
+    
 }

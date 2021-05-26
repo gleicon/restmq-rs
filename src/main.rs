@@ -2,6 +2,8 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 use actix_web::{web, App, HttpServer, middleware};
+#[macro_use]
+extern crate log;
 
 mod handlers;
 mod queue;
@@ -9,6 +11,9 @@ mod subscriber;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    env_logger::init();
+    info!("Starting RESTMQ");
+
     let data = web::Data::new(Mutex::new(queue::QueueManager{ 
         index: HashMap::new(), 
         subscribers: HashMap::new() }));
