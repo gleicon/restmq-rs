@@ -60,6 +60,8 @@ impl PersistenceManager {
 
     pub fn pop_item(&mut self, queue_name: String) -> Result<Box<Vec<u8>>> {
         let db = self.databases.get(&queue_name.clone());
+
+        // fetch or create the db handler
         let dbc = match db.clone() {
             Some(_) => (db),
             None => {
@@ -68,9 +70,15 @@ impl PersistenceManager {
             },
         };
 
-        let (_,  value) = dbc.unwrap().last().unwrap().unwrap();
-        let bres = bincode::deserialize(value.as_ref()).unwrap();
-        Ok(Box::new(bres))
+        //         let (_,  value) = dbc.unwrap().last().unwrap().unwrap();
+
+        let dbc = dbc.unwrap();
+
+        match dbc.pop_max().unwrap() {
+            Some((_, value)) => Ok(Box::new(bincode::deserialize(value.as_ref()).unwrap())),
+            None => Ok(Box::new([].to_vec())),
+        }
+
     }
 
     pub fn load_or_create_database(&mut self, queue_name: String) -> Result<()> {
