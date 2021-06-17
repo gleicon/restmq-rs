@@ -1,12 +1,12 @@
 
-use std::collections::{VecDeque, HashMap, HashSet};
+use std::collections::{VecDeque, HashMap};
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, Arc};
 use tokio::sync::mpsc::UnboundedSender;
 use actix_web::web::Bytes;
 use uuid::Uuid;
 use std::time::SystemTime;
-use tokio::sync::mpsc::unbounded_channel; //{channel, unbounded};
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::mpsc::error::SendError;
 
 
@@ -18,17 +18,34 @@ pub struct QueueMessageEnvelope {
     pub created_at: SystemTime,
 }
 
+
+
 #[derive(Clone)]
-pub struct QueueManager {
+pub struct QueueManager{
+    // in memory queues
     pub index: HashMap<String, Arc<Mutex<VecDeque<String>>>>,
     //pub subscribers: HashMap<String, Arc<Mutex<Vec<UnboundedSender<Bytes>>>>>,
     pub subscribers: HashMap<String, Arc<Mutex<VecDeque<UnboundedSender<Bytes>>>>>,
+    // disk backed queues
+    // TODO: this is just mirroring messages, should be in the middle of the flow
+    pub persistence_manager: crate::persistence::PersistenceManager,
 }
 
 impl QueueManager {
+
+    pub fn new (basepath:  String) -> Self {
+        let pm = crate::persistence::PersistenceManager::new(basepath);
+        let s = Self {
+            index: HashMap::new(),
+            subscribers: HashMap::new(),
+            persistence_manager: pm,
+        };
+        return s
+    }
+
     fn new_queue(&mut self, queue_name: String) {
         self.index.insert(queue_name.clone(),Arc::new(Mutex::new(VecDeque::new())));
-        //self.subscribers.insert(queue_name,Arc::new(Mutex::new(VecDeque::new())));
+        self.persistence_manager.load_or_create_database(queue_name).unwrap();
     }
 
     fn queue_exists(&mut self, queue_name: &String) -> bool {
@@ -44,7 +61,6 @@ impl QueueManager {
 
         if !self.queue_exists(&queue_name) && create_queue {
             self.new_queue(queue_name.clone());
-           // self.index.insert(queue_name.clone(), Arc::new(Mutex::new(VecDeque::new())));
         } else if !self.index.contains_key(&queue_name) {
             return Err(format!("Queue <{}> does not exists", queue_name.clone()));
         }
@@ -56,12 +72,15 @@ impl QueueManager {
             Err(e) => return Err(format!("Error queue <{}>: {}", queue_name.clone(), e)),
         }       
 
-        self.publish_to_subscribers(queue_name.clone(), msg.clone());
+        // persist
+        self.persistence_manager.push_item(queue_name.clone(), msg.clone().as_bytes().to_vec()).unwrap(); 
+
+        // assume "queue was created successfully or bust"
+        self.publish_to_subscribers(queue_name, msg.clone());
         return Ok(msg)
     }
  
-    pub fn publish_to_subscribers(&mut self, queue_name: String, message: String) {
-        //let mut clean_vector = Vec::new(); //Arc::new(Mutex::new(Vec::new()))
+    fn publish_to_subscribers(&mut self, queue_name: String, message: String) {
         let mut online_subs: VecDeque<UnboundedSender<Bytes>> = VecDeque::new();
         let mut dirt = false;
 
@@ -110,7 +129,7 @@ impl QueueManager {
 
     pub fn queue_retrieve(self: Self, queue_name: String) -> Result<String, String> {
         let queue = self.index.get(&queue_name);
-    
+        
         match queue {
             Some(vect) => match vect.lock() { 
                 Ok(mut v) => { 
