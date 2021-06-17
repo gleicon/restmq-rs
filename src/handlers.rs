@@ -17,7 +17,7 @@ async fn list_queues(data: web::Data<Mutex<crate::queue::QueueManager>>) ->  Res
 
 #[get("/q/{queuename}")]
 async fn queue_read(info: web::Path<QueueInfo>, data: web::Data<Mutex<crate::queue::QueueManager>>) -> Result<HttpResponse, Error> { 
-    let data = data.lock().unwrap().clone();
+    let mut data = data.lock().unwrap().clone();
 
     match data.queue_retrieve(info.queuename.clone()) {
         Ok(m) => return Ok(HttpResponse::Ok().content_type("application/json").body(m)),
