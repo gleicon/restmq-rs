@@ -59,8 +59,16 @@ impl PersistenceManager {
     }
 
     pub fn pop_item(&mut self, queue_name: String) -> Result<Box<Vec<u8>>> {
-        let db = self.databases.get(&queue_name).unwrap();
-        let (_,  value) = db.last().unwrap().unwrap();
+        let db = self.databases.get(&queue_name.clone());
+        let dbc = match db.clone() {
+            Some(_) => (db),
+            None => {
+                self.load_or_create_database(queue_name.clone()).unwrap();
+                self.databases.get(&queue_name)
+            },
+        };
+
+        let (_,  value) = dbc.unwrap().last().unwrap().unwrap();
         let bres = bincode::deserialize(value.as_ref()).unwrap();
         Ok(Box::new(bres))
     }
