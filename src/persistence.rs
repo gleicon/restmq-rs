@@ -15,8 +15,7 @@ use serde::{Serialize, Deserialize};
 
 // create queue/database
 // on start: read all database handlers
-// TODO: on key change: watch_prefix
-// TODO: cleanup
+// TODO: on key change: watch_prefix per table w/ watcher registration
 // TODO: stats: disk space, queue number, queue sizes
 // TODO: bound topics/tables (expire/delete old messages)
 
@@ -70,8 +69,6 @@ impl PersistenceManager {
             },
         };
 
-        //         let (_,  value) = dbc.unwrap().last().unwrap().unwrap();
-
         let dbc = dbc.unwrap();
 
         match dbc.pop_max().unwrap() {
@@ -124,11 +121,3 @@ impl PersistenceManager {
         return s
     }
 }
-
-
-// fn main() {
-//     let path = "lero".to_string();
-//     let mut pm = PersistenceManager::new(&path);
-//     let _ = pm.push_item("test".to_string(), "nheco".to_string().into_bytes());
-//     print!("{}", format!("{:?}", pm.pop_item("test".to_string())));
-// }
