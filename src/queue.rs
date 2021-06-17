@@ -127,24 +127,29 @@ impl QueueManager {
     return payload_all_queues.unwrap().to_string()
     }
 
-    pub fn queue_retrieve(self: Self, queue_name: String) -> Result<String, String> {
-        let queue = self.index.get(&queue_name);
+    pub fn queue_retrieve(&mut self, queue_name: String) -> Result<String, String> {
+        //let queue = self.index.get(&queue_name);
         
-        match queue {
-            Some(vect) => match vect.lock() { 
-                Ok(mut v) => { 
-                    match v.pop_front() {
-                        Some(payload) => { 
-                            return Ok(payload)
-                        },
+        // match queue {
+        //     Some(vect) => match vect.lock() { 
+        //         Ok(mut v) => { 
+        //             match v.pop_front() {
+        //                 Some(payload) => { 
+        //                     return Ok(payload)
+        //                 },
                         
-                        None => return Err("[]".to_string()),
-                    }
-                }, 
-                Err(e) => return Err(format!("msg: err fetching message from topic {:?} -  {:?}", queue_name.clone(), e)),
-            }, 
-            None => return Ok(format!("msg: queue <{:?}> not found", queue_name.clone())),
+        //                 None => return Err("[]".to_string()),
+        //             }
+        //         }, 
+        //         Err(e) => return Err(format!("msg: err fetching message from topic {:?} -  {:?}", queue_name.clone(), e)),
+        //     }, 
+        //     None => return Ok(format!("msg: queue <{:?}> not found", queue_name.clone())),
+        // }
+        match self.persistence_manager.pop_item(queue_name.clone()) {
+            Ok(payload) => return Ok(String::from_utf8(*payload).unwrap()),
+            Err(e) => return Err(format!("msg: err fetching message from topic {:?} -  {:?}", queue_name.clone(), e)),
         }
+
     }
 
     pub fn append_subscriber(&mut self, queue_name: String) -> Result<crate::subscriber::SubscriberChannel, String> {

@@ -60,7 +60,7 @@ impl PersistenceManager {
 
     pub fn pop_item(&mut self, queue_name: String) -> Result<Box<Vec<u8>>> {
         let db = self.databases.get(&queue_name).unwrap();
-        let (_,  value) = db.first().unwrap().unwrap();
+        let (_,  value) = db.last().unwrap().unwrap();
         let bres = bincode::deserialize(value.as_ref()).unwrap();
         Ok(Box::new(bres))
     }

@@ -1,5 +1,4 @@
 
-use std::collections::HashMap;
 use std::sync::Mutex;
 use actix_web::{web, App, HttpServer, middleware};
 #[macro_use]
