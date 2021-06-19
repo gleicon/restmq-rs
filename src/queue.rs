@@ -5,7 +5,7 @@ use std::sync::{Mutex, Arc};
 use tokio::sync::mpsc::UnboundedSender;
 use actix_web::web::Bytes;
 use uuid::Uuid;
-use std::time::SystemTime;
+use chrono::{Local, DateTime};
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::mpsc::error::SendError;
 
@@ -15,7 +15,7 @@ use tokio::sync::mpsc::error::SendError;
 pub struct QueueMessageEnvelope {
     pub id: Uuid,
     pub body: String,
-    pub created_at: SystemTime,
+    pub created_at: DateTime<Local>,
 }
 
 
@@ -55,7 +55,8 @@ impl QueueManager {
     pub fn push_message(&mut self, queue_name: String, message: String, create_queue: bool) -> Result<String, String> {
 
         let uuid = Uuid::new_v4();
-        let payload = QueueMessageEnvelope {id: uuid, body: message, created_at: SystemTime::now()};
+        let dt = Local::now();
+        let payload = QueueMessageEnvelope {id: uuid, body: message, created_at: dt};
         let json_payload = serde_json::to_value(&payload);
         let msg = json_payload.unwrap().to_string();
 
@@ -81,6 +82,7 @@ impl QueueManager {
     }
  
     fn publish_to_subscribers(&mut self, queue_name: String, message: String) {
+        // TODO: getting a key, reading from tb and broadcasting ? pop or last ?
         let mut online_subs: VecDeque<UnboundedSender<Bytes>> = VecDeque::new();
         let mut dirt = false;
 
