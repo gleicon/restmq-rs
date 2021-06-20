@@ -3,7 +3,7 @@ use std::collections::{VecDeque, HashMap};
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, Arc};
 use tokio::sync::mpsc::UnboundedSender;
-use actix_web::web::Bytes;
+//use actix_web::web::Bytes;
 use uuid::Uuid;
 use chrono::{Local, DateTime};
 use tokio::sync::mpsc::unbounded_channel;
@@ -25,7 +25,7 @@ pub struct QueueManager{
     // in memory queues
     pub index: HashMap<String, Arc<Mutex<VecDeque<String>>>>,
     //pub subscribers: HashMap<String, Arc<Mutex<Vec<UnboundedSender<Bytes>>>>>,
-    pub subscribers: HashMap<String, Arc<Mutex<VecDeque<UnboundedSender<Bytes>>>>>,
+    pub subscribers: HashMap<String, Arc<Mutex<VecDeque<UnboundedSender<String>>>>>,
     // disk backed queues
     // TODO: this is just mirroring messages, should be in the middle of the flow
     pub persistence_manager: crate::persistence::PersistenceManager,
@@ -74,24 +74,35 @@ impl QueueManager {
         }       
 
         // persist
-        self.persistence_manager.push_item(queue_name.clone(), msg.clone().as_bytes().to_vec()).unwrap(); 
-
-        // assume "queue was created successfully or bust"
-        self.publish_to_subscribers(queue_name, msg.clone());
-        return Ok(msg)
+        match self.persistence_manager.push_item(queue_name.clone(), msg.clone()) {
+            Ok(kev) => {
+                self.publish_to_subscribers(queue_name, kev);
+                Ok(msg)
+            }, 
+            Err(e) => Err(e)
+        }
+        
     }
  
-    fn publish_to_subscribers(&mut self, queue_name: String, message: String) {
-        // TODO: getting a key, reading from tb and broadcasting ? pop or last ?
-        let mut online_subs: VecDeque<UnboundedSender<Bytes>> = VecDeque::new();
+    // receives a K/V Timestamp with what happened to the key
+    fn publish_to_subscribers(&mut self, queue_name: String, kvt: crate::persistence::KVTimestamp) {
+        let mut online_subs: VecDeque<UnboundedSender<String>> = VecDeque::new();
         let mut dirt = false;
 
         match self.subscribers.get(&queue_name) {
             Some(subs) => {
                 let mut counter = 0;
                 info!("Subscribers count: {}", subs.lock().unwrap().len());
+
+                let msg = kvt.value.clone();
+                info!("{:?}", msg.clone());
+
+                let ss = msg +  "\n\n";
+
+                info!("{}", ss.clone());
+
                 for subscriber in subs.lock().unwrap().iter() {
-                    match subscriber.send(Bytes::from(message.clone() + "\n\n")) {
+                    match subscriber.send(ss.clone()) { 
                         Ok(_m) => online_subs.push_back(subscriber.clone()), 
                         Err(SendError(_)) => {
                             dirt = true;
@@ -160,7 +171,7 @@ impl QueueManager {
                 }
             }
         }
-        Ok(crate::subscriber::SubscriberChannel(rx))
+        Ok(crate::subscriber::SubscriberChannel(rx)) //Bytes::from(ss.clone())
     }
     
 }

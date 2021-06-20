@@ -28,7 +28,7 @@ use chrono::Local;
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 struct Envelope {
-    body: Vec<u8>,
+    body: String, //Vec<u8>,
 }
 
 #[derive(Clone)]
@@ -40,14 +40,15 @@ pub struct PersistenceManager{
 
 #[derive(Clone)]
 pub struct KVTimestamp {
-    key: Vec<u8>,
-    value: Vec<u8>,
-    timestamp: i64,
+    pub key: Vec<u8>,
+    pub old_value: String,
+    pub value: String,
+    pub timestamp: i64,
 }
 
 impl PersistenceManager {
 
-    pub fn push_item(&mut self, queue_name: String, body: Vec<u8>) -> Result<KVTimestamp, String> {
+    pub fn push_item(&mut self, queue_name: String, body: String) -> Result<KVTimestamp, String> {
         let mut db = self.databases.get(&queue_name.clone());
         match db.clone() {
             Some(_) => (),
@@ -62,17 +63,21 @@ impl PersistenceManager {
         let bbody = Envelope {body: body.clone()};
         let encoded: Vec<u8> = bincode::serialize(&bbody).unwrap();
 
-        let res = db.insert(key.clone(), encoded);
-        let res = res.unwrap();
-     
+        let res = db.insert(key.clone(), encoded.clone());
+
         match res {
-            Some(b) => {
+            Ok(Some(b)) => { // value existed
                 let dt = Local::now();
-                let v = bincode::deserialize(&b.to_vec()).unwrap();
-                let ev = KVTimestamp {key: key.as_bytes().to_vec(), value: v, timestamp: dt.timestamp_millis()};
+                let v: Option<String> = bincode::deserialize(&b.to_vec()).unwrap();
+                let ev = KVTimestamp {key: key.as_bytes().to_vec(), old_value: v.unwrap(), value: body.clone(), timestamp: dt.timestamp_millis()};
                 Ok(ev)
-            }, 
-            None => Err("Error persisting message".to_string()),
+            },
+            Ok(None) => { // new value
+                let dt = Local::now();
+                let ev = KVTimestamp {key: key.as_bytes().to_vec(), old_value: body.clone(), value: body.clone(), timestamp: dt.timestamp_millis()};
+                Ok(ev)
+            },
+            Err(e) => Err(format!("Error persisting message: {}", e)),
         }
     }
 
