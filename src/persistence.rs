@@ -1,9 +1,15 @@
 
-use sled::{Config, Result};
+use sled::{Config};
+//use std::result::Result;
+//use std::error::Error;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::fs;
 use serde::{Serialize, Deserialize};
+use chrono::Local;
+
+
 
 // persistence manager for restmq
 // one database per queue, initialized in the same directory 
@@ -22,7 +28,7 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 struct Envelope {
-    body: Vec<u8>,
+    body: String, //Vec<u8>,
 }
 
 #[derive(Clone)]
@@ -32,9 +38,17 @@ pub struct PersistenceManager{
     databases: HashMap<String, sled::Db>,
 }
 
+#[derive(Clone)]
+pub struct KVTimestamp {
+    pub key: Vec<u8>,
+    pub old_value: String,
+    pub value: String,
+    pub timestamp: i64,
+}
+
 impl PersistenceManager {
 
-    pub fn push_item(&mut self, queue_name: String, body: Vec<u8>) -> Result<Box<Vec<u8>>> {
+    pub fn push_item(&mut self, queue_name: String, body: String) -> Result<KVTimestamp, String> {
         let mut db = self.databases.get(&queue_name.clone());
         match db.clone() {
             Some(_) => (),
@@ -49,15 +63,25 @@ impl PersistenceManager {
         let bbody = Envelope {body: body.clone()};
         let encoded: Vec<u8> = bincode::serialize(&bbody).unwrap();
 
-        let res = db.insert(key, encoded);
-        let res = res.unwrap();
+        let res = db.insert(key.clone(), encoded.clone());
+
         match res {
-            Some(b) => Ok(Box::new(bincode::deserialize(&b.to_vec()).unwrap())), 
-            None => Ok(Box::new([].to_vec())),
+            Ok(Some(b)) => { // value existed
+                let dt = Local::now();
+                let v: Option<String> = bincode::deserialize(&b.to_vec()).unwrap();
+                let ev = KVTimestamp {key: key.as_bytes().to_vec(), old_value: v.unwrap(), value: body.clone(), timestamp: dt.timestamp_millis()};
+                Ok(ev)
+            },
+            Ok(None) => { // new value
+                let dt = Local::now();
+                let ev = KVTimestamp {key: key.as_bytes().to_vec(), old_value: body.clone(), value: body.clone(), timestamp: dt.timestamp_millis()};
+                Ok(ev)
+            },
+            Err(e) => Err(format!("Error persisting message: {}", e)),
         }
     }
 
-    pub fn pop_item(&mut self, queue_name: String) -> Result<Box<Vec<u8>>> {
+    pub fn pop_item(&mut self, queue_name: String) -> Result<Box<Vec<u8>>, String> {
         let db = self.databases.get(&queue_name.clone());
 
         // fetch or create the db handler
@@ -73,19 +97,45 @@ impl PersistenceManager {
 
         match dbc.pop_max().unwrap() {
             Some((_, value)) => Ok(Box::new(bincode::deserialize(value.as_ref()).unwrap())),
-            None => Ok(Box::new([].to_vec())),
+            None => Err("Empty queue table".to_string()),
         }
 
     }
 
-    pub fn load_or_create_database(&mut self, queue_name: String) -> Result<()> {
+    pub fn pop_item_by_key(&mut self, queue_name: String, key: String) -> Result<Box<Vec<u8>>, String> {
+        let db = self.databases.get(&queue_name.clone());
+        // fetch or create the db handler
+        let dbc = match db.clone() {
+            Some(_) => (db),
+            None => {
+                self.load_or_create_database(queue_name.clone()).unwrap();
+                self.databases.get(&queue_name)
+            },
+        };
+
+        let dbc = dbc.unwrap();
+
+        match dbc.get(key).unwrap() {
+            Some(value) => Ok(Box::new(bincode::deserialize(value.as_ref()).unwrap())),
+            None => Err("Empty queue table".to_string()),
+        }
+
+    }
+
+    pub fn load_or_create_database(&mut self, queue_name: String) -> Result<bool, String> {
         let mut pb = PathBuf::new();
         pb.push(&self.path);
         pb.push(queue_name.clone());
         let config = Config::new().path(pb);
-        let db = config.open()?;
-        self.databases.insert(queue_name, db);
-        Ok(())
+        match config.open() {
+            Ok(d) => { 
+                self.databases.insert(queue_name, d); 
+                Ok(true)
+            },
+            Err(e) => {
+                Err(format!("Error opening database: {:?}", e))
+             } 
+        }
     }
 
     pub fn setup(&mut self) {
@@ -100,7 +150,6 @@ impl PersistenceManager {
         let dir = &self.path;
             if dir.is_dir() {
                 for entry in fs::read_dir(dir).unwrap() {
-                    //let entry = entry?;
                     let path = entry.unwrap().path();
                     if path.is_dir() {
                         let queue_name = path.to_str().unwrap().to_string();

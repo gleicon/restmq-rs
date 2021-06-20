@@ -3,9 +3,9 @@ use std::collections::{VecDeque, HashMap};
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, Arc};
 use tokio::sync::mpsc::UnboundedSender;
-use actix_web::web::Bytes;
+//use actix_web::web::Bytes;
 use uuid::Uuid;
-use std::time::SystemTime;
+use chrono::{Local, DateTime};
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::mpsc::error::SendError;
 
@@ -15,7 +15,7 @@ use tokio::sync::mpsc::error::SendError;
 pub struct QueueMessageEnvelope {
     pub id: Uuid,
     pub body: String,
-    pub created_at: SystemTime,
+    pub created_at: DateTime<Local>,
 }
 
 
@@ -25,7 +25,7 @@ pub struct QueueManager{
     // in memory queues
     pub index: HashMap<String, Arc<Mutex<VecDeque<String>>>>,
     //pub subscribers: HashMap<String, Arc<Mutex<Vec<UnboundedSender<Bytes>>>>>,
-    pub subscribers: HashMap<String, Arc<Mutex<VecDeque<UnboundedSender<Bytes>>>>>,
+    pub subscribers: HashMap<String, Arc<Mutex<VecDeque<UnboundedSender<String>>>>>,
     // disk backed queues
     // TODO: this is just mirroring messages, should be in the middle of the flow
     pub persistence_manager: crate::persistence::PersistenceManager,
@@ -55,7 +55,8 @@ impl QueueManager {
     pub fn push_message(&mut self, queue_name: String, message: String, create_queue: bool) -> Result<String, String> {
 
         let uuid = Uuid::new_v4();
-        let payload = QueueMessageEnvelope {id: uuid, body: message, created_at: SystemTime::now()};
+        let dt = Local::now();
+        let payload = QueueMessageEnvelope {id: uuid, body: message, created_at: dt};
         let json_payload = serde_json::to_value(&payload);
         let msg = json_payload.unwrap().to_string();
 
@@ -73,23 +74,38 @@ impl QueueManager {
         }       
 
         // persist
-        self.persistence_manager.push_item(queue_name.clone(), msg.clone().as_bytes().to_vec()).unwrap(); 
-
-        // assume "queue was created successfully or bust"
-        self.publish_to_subscribers(queue_name, msg.clone());
-        return Ok(msg)
+        match self.persistence_manager.push_item(queue_name.clone(), msg.clone()) {
+            Ok(kev) => {
+                self.publish_to_subscribers(queue_name, kev);
+                Ok(msg)
+            }, 
+            Err(e) => Err(e)
+        }
+        
     }
  
-    fn publish_to_subscribers(&mut self, queue_name: String, message: String) {
-        let mut online_subs: VecDeque<UnboundedSender<Bytes>> = VecDeque::new();
+    // receives a K/V Timestamp with what happened to the key
+    fn publish_to_subscribers(&mut self, queue_name: String, kvt: crate::persistence::KVTimestamp) {
+        let mut online_subs: VecDeque<UnboundedSender<String>> = VecDeque::new();
         let mut dirt = false;
 
+        // after notified, call queue_retrieve over kvt.key instead of passing the copied message for consistency
+        
         match self.subscribers.get(&queue_name) {
-            Some(subs) => {
+            Some(subs) => { 
                 let mut counter = 0;
                 info!("Subscribers count: {}", subs.lock().unwrap().len());
+                // this gets the exact message the kvt key points, sort of mixing offset w keys
+                // this could be used to set the subscriber in the earliest message too or always send the last message regardless
+                let persisted_message = self.clone().queue_retrieve_by_key(queue_name.clone(), String::from_utf8(kvt.key).unwrap());
+
+                // instead of using the copy of the message on kvt as
+                // let msg = kvt.value.clone();
+                // we use the one from queue_retrieve_by_key, honoring the notification
+                let msg = persisted_message.unwrap();
+                let ss = msg +  "\n\n";
                 for subscriber in subs.lock().unwrap().iter() {
-                    match subscriber.send(Bytes::from(message.clone() + "\n\n")) {
+                    match subscriber.send(ss.clone()) { 
                         Ok(_m) => online_subs.push_back(subscriber.clone()), 
                         Err(SendError(_)) => {
                             dirt = true;
@@ -135,6 +151,14 @@ impl QueueManager {
 
     }
 
+    pub fn queue_retrieve_by_key(&mut self, queue_name: String, key: String) -> Result<String, String> {
+        match self.persistence_manager.pop_item_by_key(queue_name.clone(), key.clone()) {
+            Ok(payload) => return Ok(String::from_utf8(*payload).unwrap()),
+            Err(e) => return Err(format!("msg: err fetching message from topic {:?} -  {:?}", queue_name.clone(), e)),
+        }
+
+    }
+
     pub fn append_subscriber(&mut self, queue_name: String) -> Result<crate::subscriber::SubscriberChannel, String> {
     
         let (tx, rx) = unbounded_channel();
@@ -158,7 +182,7 @@ impl QueueManager {
                 }
             }
         }
-        Ok(crate::subscriber::SubscriberChannel(rx))
+        Ok(crate::subscriber::SubscriberChannel(rx)) //Bytes::from(ss.clone())
     }
     
 }

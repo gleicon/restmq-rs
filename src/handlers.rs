@@ -43,7 +43,7 @@ async fn queue_streaming(info: web::Path<QueueInfo>, data: web::Data<Mutex<crate
 
     let mut data = data.lock().unwrap();
     match data.append_subscriber(info.queuename.clone()) {
-        Ok(sb) =>  return Ok(HttpResponse::Ok().streaming(sb)),
+        Ok(sb) =>  return Ok(HttpResponse::Ok().content_type("application/json").streaming(sb)),
         Err(_e) =>  return Ok(HttpResponse::BadRequest().content_type("application/json").body(format!("msg: error subscribing {:?}", &info.queuename))),
     };
 }
