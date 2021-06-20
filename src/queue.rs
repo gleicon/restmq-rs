@@ -89,18 +89,21 @@ impl QueueManager {
         let mut online_subs: VecDeque<UnboundedSender<String>> = VecDeque::new();
         let mut dirt = false;
 
+        // after notified, call queue_retrieve over kvt.key instead of passing the copied message for consistency
+        
         match self.subscribers.get(&queue_name) {
-            Some(subs) => {
+            Some(subs) => { 
                 let mut counter = 0;
                 info!("Subscribers count: {}", subs.lock().unwrap().len());
+                // this gets the exact message the kvt key points, sort of mixing offset w keys
+                // this could be used to set the subscriber in the earliest message too or always send the last message regardless
+                let persisted_message = self.clone().queue_retrieve_by_key(queue_name.clone(), String::from_utf8(kvt.key).unwrap());
 
-                let msg = kvt.value.clone();
-                info!("{:?}", msg.clone());
-
+                // instead of using the copy of the message on kvt as
+                // let msg = kvt.value.clone();
+                // we use the one from queue_retrieve_by_key, honoring the notification
+                let msg = persisted_message.unwrap();
                 let ss = msg +  "\n\n";
-
-                info!("{}", ss.clone());
-
                 for subscriber in subs.lock().unwrap().iter() {
                     match subscriber.send(ss.clone()) { 
                         Ok(_m) => online_subs.push_back(subscriber.clone()), 
@@ -142,6 +145,14 @@ impl QueueManager {
 
     pub fn queue_retrieve(&mut self, queue_name: String) -> Result<String, String> {
         match self.persistence_manager.pop_item(queue_name.clone()) {
+            Ok(payload) => return Ok(String::from_utf8(*payload).unwrap()),
+            Err(e) => return Err(format!("msg: err fetching message from topic {:?} -  {:?}", queue_name.clone(), e)),
+        }
+
+    }
+
+    pub fn queue_retrieve_by_key(&mut self, queue_name: String, key: String) -> Result<String, String> {
+        match self.persistence_manager.pop_item_by_key(queue_name.clone(), key.clone()) {
             Ok(payload) => return Ok(String::from_utf8(*payload).unwrap()),
             Err(e) => return Err(format!("msg: err fetching message from topic {:?} -  {:?}", queue_name.clone(), e)),
         }

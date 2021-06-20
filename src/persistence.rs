@@ -102,6 +102,26 @@ impl PersistenceManager {
 
     }
 
+    pub fn pop_item_by_key(&mut self, queue_name: String, key: String) -> Result<Box<Vec<u8>>, String> {
+        let db = self.databases.get(&queue_name.clone());
+        // fetch or create the db handler
+        let dbc = match db.clone() {
+            Some(_) => (db),
+            None => {
+                self.load_or_create_database(queue_name.clone()).unwrap();
+                self.databases.get(&queue_name)
+            },
+        };
+
+        let dbc = dbc.unwrap();
+
+        match dbc.get(key).unwrap() {
+            Some(value) => Ok(Box::new(bincode::deserialize(value.as_ref()).unwrap())),
+            None => Err("Empty queue table".to_string()),
+        }
+
+    }
+
     pub fn load_or_create_database(&mut self, queue_name: String) -> Result<bool, String> {
         let mut pb = PathBuf::new();
         pb.push(&self.path);
